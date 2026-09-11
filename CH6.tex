@@ -1,0 +1,11 @@
+
+\section{Conclusion}
+
+This paper presents a scalable GPU-accelerated ADMM framework for lower-bound finite element limit analysis. By leveraging ADMM together with tailored acceleration strategies, the proposed method provides an efficient solution pipeline for large-scale FELA problems. The framework is validated systematically on 2D benchmark problems and further extended to representative 3D applications.
+
+Across the considered benchmarks, the proposed solver delivers substantial reductions in time-to-solution relative to a state-of-the-art interior-point solver, while maintaining essentially identical LB collapse multipliers. In particular, the numerical results demonstrate that the speedups are achieved without sacrificing solution quality, supporting the use of the proposed approach as a practical alternative for large-scale conic optimization problems. Combined with adaptive mesh refinement, the solver is able to obtain a tight, strict LB solution of a large-scale 2D problem on a modest GPU. Representative 3D benchmarks show that the proposed solver remains computationally effective beyond the 2D setting, while large-scale adaptive mesh refinement simulations further highlight its scalability and practical applicability. Together, these results indicate that the proposed method combines strong performance in 2D with promising extensibility to 3D lower-bound FELA.
+
+In addition, the integration of adaptive mesh refinement (AMR) and Bernstein elements further improves the quality of the computed strict lower bound, enabling high-quality solutions to be obtained efficiently for challenging geometries and complex geotechnical stress fields. The projection-based formulation also highlights the flexibility of the proposed ADMM framework, indicating its potential to accommodate more sophisticated yield criteria within the same computational pipeline.
+
+Overall, the combination of scalable conic optimization, GPU acceleration, mesh adaptivity, and higher-order elements provides an effective workflow toward high-fidelity limit analysis at problem sizes that are difficult to handle with conventional second-order methods.
+

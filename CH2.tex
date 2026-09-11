@@ -1,0 +1,159 @@
+
+\section{Implementation of an ADMM solver}
+
+
+\subsection{ADMM Formulation and Updates}
+
+We consider the following standard-form second-order cone program (SOCP), consisting of a linear objective function, affine equality constraints, and conic constraints:
+%
+\begin{equation}
+\begin{array}{ll}
+\textbf{minimize}   & c^\top x \\
+\textbf{subject to} & Ax + s = b, \\
+                    & s \in \mathcal{K}.
+\end{array}
+\label{eq:cvxproblem}
+\end{equation}
+%
+Here, \(x \in \mathbb{R}^{n}\) is the decision variable, \(c \in \mathbb{R}^{n}\) defines the linear objective function, \(A \in \mathbb{R}^{m\times n}\) and \(b \in \mathbb{R}^{m}\) define the affine coupling constraints, and \(s \in \mathbb{R}^{m}\) is a slack variable introduced to express the constraints in conic form.
+
+The cone \(\mathcal{K}\subseteq\mathbb{R}^{m}\) is defined as the Cartesian product of a zero cone and a collection of second-order cones:
+%
+\begin{equation}
+\mathcal{K}
+=
+\{0\}^{N_l}
+\times
+\prod_{i=1}^{N_{\mathrm{SOC}}}
+\mathcal{Q}^{q_i},
+\label{eq:coneK}
+\end{equation}
+%
+where \(N_l\) denotes the number of affine equality constraints, \(N_{\mathrm{SOC}}\) denotes the number of second-order-cone blocks, and \(q_i\) denotes the dimension of the \(i\)-th cone block. Accordingly, the total number of constraints is
+%
+\begin{equation}
+m
+=
+N_l
++
+\sum_{i=1}^{N_{\mathrm{SOC}}} q_i.
+\label{eq:Kdef}
+\end{equation}
+%
+The zero-cone component \(\{0\}^{N_l}\) fixes the corresponding entries of \(s\) to zero, thereby enforcing those constraints as equalities. The \(q_i\)-dimensional second-order cone is defined as
+%
+\begin{equation}
+\mathcal{Q}^{q_i}
+=
+\left\{
+(t,\boldsymbol{r})\in\mathbb{R}\times\mathbb{R}^{q_i-1}
+\;\middle|\;
+\|\boldsymbol{r}\|_2 \leq t
+\right\}.
+\label{socDef}
+\end{equation}
+
+The detailed construction of \(A\), \(b\), and the individual cone blocks is presented in the following section. In the ADMM formulation, the variable splitting between \(x\) and \(s\) separates the affine and conic components of the problem. At each iteration, the \(x\)-subproblem associated with the affine coupling constraint is solved first, after which the slack variable is updated by projection onto \(\mathcal{K}\). Owing to the Cartesian-product structure of \(\mathcal{K}\), this projection is separable: the zero-cone components are set to zero, while each remaining block is projected independently onto its corresponding second-order cone \(\mathcal{Q}^{q_i}\).
+
+
+
+Following the notation given in~\eqref{eq:cvxproblem}, we may solve this problem by ADMM by first giving the augmented Lagrangian as:
+\begin{equation}
+L_\rho(x,s,y) := c^\top x+ \delta_{\mathcal{K}}(s)+y^\top (Ax+s-b)+\frac{\rho}{2}||Ax+s-b||^2
+\end{equation} where $\rho$ is a parameter that controls the penalty weight imposed on the constraint $Ax+s = b$, and the indicator function $ \delta_{\mathcal{K}}(s)$ refers to the condition $s \in \mathcal{K}$.
+
+
+We may now specify our ADMM steps as follows:
+
+\begin{enumerate}
+    \item \textbf{Primal variable update:} Minimize the augmented Lagrangian $L_\rho(x, s, y)$ with respect to $x$.
+    
+    \item \textbf{Projection step:} Update $s$ by projecting onto the intersecting cones, $\mathcal{K}$.
+    
+    \item \textbf{Dual variable update:} Update the multiplier $y$.
+\end{enumerate}
+
+\subsubsection{Primal variable update}
+
+As depicted above, the first step of ADMM includes the minimization of the augmented Lagrangian. However, in an attempt to further improve the convergence behaviour of the proposed solver, we chose to adopt a non-uniform penalty parameter $\rho$. The operation of multiplying a scalar $\rho$ corresponds to applying the same level of penalty across all constraints, whereas the proposed approach initializes the linear equality constraints with larger penalties. This distinction reflects the fact that these constraints are always active, whereas not all SOC constraints are necessarily active during the iterations. We also conduct regular checks on the active SOCs, and changing the corresponding penalty parameters in our implementation, the scheme will be elaborated in section 4.
+
+Specifically, the first 
+$N_{l}$  linear equality constraints, that in the optimization process are always active, are assigned a large positive value, which is $10^4 \rho$ as default, while the remaining entries are set to a small positive value, $\rho = 0.1$ as default, though the choice of this parameter largely depends on the specific optimization problem at hand. We implement the idea of assigning different weights to constraints as a multiplication of a diagonal matrix, $D(\rho)$, and its definition is as follows:
+\begin{equation}
+D(\rho) := \text{diag}(\rho_1, \dots, \rho_m), \quad
+\rho_i = \left\{
+\begin{array}{ll}
+10^4  \rho & i \leq N_l \\
+\rho & N_l < i \leq N
+\end{array}
+\right.
+\end{equation}
+here $N$ corresponds to the number of constraints in total.
+
+
+The augmented Lagrangian now becomes: 
+\begin{equation}
+L_\rho(x,s,y) := c^\top x+ \delta_{\mathcal{K}}(s)+\frac{1}{2}(Ax+s-b+D(\rho)^{-1}y)^\top D(\rho)(Ax+s-b+D(\rho)^{-1}y)
+\end{equation} taking its derivative with respect to $x$:
+\begin{equation}
+\Delta_x L_\rho(x,s,y) = c + A^\top D(\rho) Ax +A^\top D(\rho)  (s-b+D(\rho)^{-1}y) = 0
+\end{equation} which equates to our final linear system:
+\begin{equation}
+A^\top D(\rho)  Ax = -(c+A^\top D(\rho) (s-b+D(\rho)^{-1}y))
+\label{eq:KKT}
+\end{equation}
+
+The primal variable update may then be obtained by solving the linear system above. Notice that the left hand side matrix is a condensed matrix of shape $N_v \times N_v$, where $N_v$ is the total number of variables. This matrix is sparse, symmetric and positive definite, which allows the use of Cholesky factorization routines.
+
+\subsubsection{Projection step}
+
+In principle, the slack variable is updated through the following formula:
+\begin{equation}
+s^{k+1} := \arg\min_{s} L_\rho(x^{k+1},s,y^k)
+\end{equation} Substituting the explicit form of the augmented Lagrangian, this becomes:
+\begin{equation}
+s^{k+1} := \arg\min_{s} \{ \delta_\mathcal{K}(s)+\frac{\rho}{2}||s -  (b - Ax^{k+1} - D(\rho)^{-1}y^k)|| \}
+\end{equation} If we take out the identification function which says $s\in\mathcal{K}$, this further becomes:
+\begin{equation}
+s^{k+1} := \arg\min_{s\in\mathcal{K}} ||s - (b - Ax^{k+1} - D(\rho)^{-1}y^k)||
+\end{equation} This update corresponds to projecting the vector $v = b - Ax^{k+1} - D(\rho)^{-1} y^k$ onto the set of intersecting convex cones $\mathcal{K}$. 
+
+In our formulation, the first $N_l$ elements of the slack variable vector corresponds to the linear equality constraints and should be always projected to zero. Then we are left with the slack variables for the yield criterion, satisfied at every stress point. The $q_i$-element segments of the $i$th SOC is specified as: $\boldsymbol{s}_i = (t_i, \boldsymbol{r}_i)$, where $i < N_{SOC}$, the total number of second-order cones, the update of $\boldsymbol{s}_i$ of our $q_i$-dimension SOCs follows this closed-form expression~\cite{COSMO}:
+\begin{equation}
+\boldsymbol{s}_i^{k+1} :=
+\begin{cases}
+(0, 0, 0) & \text{if } || \boldsymbol{r}_i ||_2 \le -t_i \\
+\left( \dfrac{ t_i + ||\boldsymbol{r}_i||_2}{2},\; \dfrac{t_i + || \boldsymbol{r}_i ||_2}{2 ||\boldsymbol{r}_i ||_2} \cdot \boldsymbol{r}_i \right) & \text{if } ||\boldsymbol{r}_i||_2 > t_i \\
+\boldsymbol{s}_i^k & \text{otherwise}
+\end{cases}
+\label{eq:2DProjection}
+\end{equation}
+\subsubsection{Dual variable update}
+
+After the projection step, the dual variable $y$ is then updated according to:
+\begin{equation}
+y^{k+1} := y^k + D(\rho) (Ax^{k+1}+s^{k+1}-b)
+\end{equation}
+\subsection{Termination criterion}
+
+Following the notation given in~\eqref{eq:cvxproblem}, we first obtain the expression of primal and dual residuals from the KKT conditions for convex optimization problems:
+\begin{equation}
+\begin{aligned}
+& r_\text{prim} = Ax + s - b\\
+& r_\text{dual} = q + A^\top y\\
+\end{aligned}
+\label{eq:res}
+\end{equation}
+
+We adopt the stopping criterion of~\cite{OSQP}, stating that the algorithm stops when the norms of the residuals $r_\mathrm{prim}^k$ and $r_\mathrm{dual}^k$ are smaller than some tolerance levels $\varepsilon_\mathrm{prim}>0$ and $\varepsilon_\mathrm{dual}>0$:
+\begin{equation}
+||r_\mathrm{prim}^k||_{\infty} \leq \varepsilon_\mathrm{prim} \quad ||r_\mathrm{prim}^k||_{\infty} \leq \varepsilon_\mathrm{prim} 
+\end{equation} where $\varepsilon_\mathrm{prim}$ and $\varepsilon_\mathrm{prim}$ are obtained using prescribed absolute and relative tolerances, $\varepsilon_\mathrm{abs}>0 $ and $\varepsilon_\mathrm{rel} > 0$, using the formula below:
+\begin{align}
+  \varepsilon_{\mathrm{prim}} &= \varepsilon_{\mathrm{abs}}
+    + \varepsilon_{\mathrm{rel}} \max \{ \| A x^k \|_{\infty}, \|s\|_{\infty}, \|b\|_{\infty} \}, \\
+  \varepsilon_{\mathrm{dual}} &= \varepsilon_{\mathrm{abs}}
+    + \varepsilon_{\mathrm{rel}} \max \{ \| A^\top y^k \|_{\infty}, \|c\|_{\infty} \}.
+\end{align} The default values for our solver are: $\varepsilon_\mathrm{abs} = \varepsilon_\mathrm{rel} = 1e-4$
+
+

@@ -1,0 +1,308 @@
+\section{Lower-Bound FELA Formulation}
+
+In lower-bound FELA, the objective is to maximize the load multiplier $\beta$ while constructing a statically admissible stress field. The stress field must satisfy equilibrium in each element, traction equilibrium across element interfaces, prescribed boundary tractions, and the yield criterion throughout the domain. After discretization, these requirements give rise to two classes of constraints: linear equality constraints associated with equilibrium and boundary conditions, and local conic constraints associated with yield admissibility.
+
+For completeness, we briefly outline the LB-FELA formulation in both 2D and 3D, and the resulting conic constraints. A more detailed description of the LB-FELA discretization and the Bernstein-polynomial stress interpolation scheme may be found in~\cite{2DLB,Bernstein_FELA}. In this paper we present only the minimal formulation needed to formulate the SOCP structure and the proposed ADMM solver.
+
+
+Element design plays a central role in maintaining the rigorous bound properties of FELA. In LB formulations, equilibrium and yield admissibility must be enforced in a way that guarantees their satisfaction throughout each element, while upper-bound formulations require the flow rule and kinematic boundary conditions to be satisfied throughout the discretized domain~\cite{LB_Bernstein, UB_bernstein}. Earlier rigorous FELA formulations commonly relied on constant-stress elements for LB analysis and linear or quadratic displacement elements for UB analysis. Higher-order UB formulations were later developed using six-noded linear strain triangular elements and SOCP-based discontinuous velocity formulations~\cite{UB_quad, UB_discon}. More recently, Bernstein polynomial elements have provided a systematic alternative to classical Lagrange elements, allowing rigorous LB and UB formulations of arbitrary polynomial order for straight-sided triangular elements~\cite{Bernstein_FELA, LB_Bernstein, UB_bernstein}. In this work, we adopt linear stress interpolation for the lower-bound formulation described below.
+
+\subsection{Linear constraints}
+
+\subsubsection{Equilibrium inside each element}
+We first consider the continuum stress equilibrium equations:
+
+\begin{equation}
+\nabla \cdot \boldsymbol{\sigma} + \boldsymbol{b} = \boldsymbol{0}
+\label{eq:continuous_equilibrium}
+\end{equation}
+where $\boldsymbol{b}$ denotes the body force vector.
+For the linear triangular element adopted in this work, the stress field is interpolated using the standard linear shape functions defined in terms of area coordinates $a_1,a_2,a_3$ or volume coordinates $v_1,v_2,v_3,v_4$:
+\begin{equation}
+\boldsymbol{h}^{(a,1)}=\{a_1,a_2,a_3\} \quad or \quad \boldsymbol{h}^{(v,1)}=\{v_1,v_2,v_3, v_4\}.
+\end{equation}
+
+If the stress values at all nodes (stress points) are given, the stress value at a point with area coordinates $\boldsymbol{a}$ in an element can be interpolated using:
+\begin{equation}
+\boldsymbol{\sigma} = \sum_{i=1}^{3} \boldsymbol{h}_i^{(a,1)} \, \boldsymbol{\sigma}_i^*
+\label{eq:interpolate_stress}
+\end{equation} in 2D, and:
+
+\begin{equation}
+\boldsymbol{\sigma} = \sum_{i=1}^{4} \boldsymbol{h}_i^{(v,1)} \, \boldsymbol{\sigma}_i^*
+\label{eq:interpolate_stress_3D}
+\end{equation} in 3D. 
+
+
+For the linear triangular element used here, $N_\mathrm{sp,e}=3$ in 2D, corresponding to the three vertices of each element. The formulation can be extended to 3D tetrahedral linear elements in an analogous manner. The vector $\boldsymbol{\sigma}^*_i$ contains the Cartesian components of the stress tensor of the $i$-th stress point as:
+\begin{equation}
+\boldsymbol{\sigma}_i^* =
+\begin{cases}
+[\sigma_{xx,i}^*, \sigma_{yy,i}^*, \sigma_{xy,i}^*]^\top, 
+& \text{in 2D}, \\[2mm]
+[\sigma_{xx,i}^*, \sigma_{yy,i}^*, \sigma_{zz,i}^*, 
+\sigma_{xy,i}^*, \sigma_{xz,i}^*, \sigma_{yz,i}^*]^\top, 
+& \text{in 3D},
+\end{cases}
+\quad i \leq N_\mathrm{sp}.
+\label{eq:stress_tensor}
+\end{equation} Here $N_\mathrm{sp}$ is the number of total stress points in the problem. 
+
+For strict intra-element equilibrium, the stress field within each linear element must satisfy:
+
+\begin{equation}
+\boldsymbol{E}\tilde{\boldsymbol{\sigma}^*}+\boldsymbol{b}=\boldsymbol{0}
+\end{equation}
+
+throughout the element, where $\tilde{\boldsymbol{\sigma}^*}$ contains the Cartesian components of the stress tensor associated with the stress points of the element, $\boldsymbol{b}=[b_x,b_y]^\top$ denotes the body force vector, and $\boldsymbol{E}$ is the element equilibrium matrix. For the linear triangular element adopted here, $\boldsymbol{E}$ is constructed by arranging the spatial derivatives of the linear basis functions $h_i^{(a,1)}$:
+
+\begin{equation}
+\boldsymbol{E}=
+\begin{bmatrix}
+h_{1,x}^{(a,1)} & 0 & h_{1,y}^{(a,1)} & \cdots & h_{3,x}^{(a,1)} & 0 & h_{3,y}^{(a,1)}\\
+0 & h_{1,y}^{(a,1)} & h_{1,x}^{(a,1)} & \cdots & 0 & h_{3,y}^{(a,1)} & h_{3,x}^{(a,1)}
+\end{bmatrix}
+\label{eq:init_system}
+\end{equation}
+
+where the subscripts $x$ and $y$ denote derivatives with respect to the spatial coordinates. Since the first-order basis functions $h_i^{(a,1)}$ are linear in the area coordinates, their spatial derivatives are constant within each element. Therefore, the equilibrium matrix $\boldsymbol{E}$ remains constant over the element.
+
+
+\subsubsection{Equilibrium between adjacent elements}
+
+In LB FELA, statically admissible discontinuities between adjacent elements are often introduced to improve the solution quality. The traction vector at the $i$th stress point on the interface of element $A$ can be obtained by:
+
+\begin{equation}
+\boldsymbol{t}^*_{Ai} = \boldsymbol{E}_A\boldsymbol{\sigma}_{Ai}^*
+\label{eq:traction}
+\end{equation} where $\boldsymbol{\sigma}_{Ai}^*$ is the stress tensor of the $i$th stress point of element A on the interface, as described in Equation~\eqref{eq:stress_tensor}. The matrix $\boldsymbol{E}_A$ projects the stress tensor in Cartesian coordinates onto the local interface surface. In 2D, this is specified by:
+
+\begin{equation}
+\boldsymbol{E}_A = 
+\begin{bmatrix}
+
+n_x & 0 & n_y \\
+0 & n_y & n_x
+\end{bmatrix} 
+\end{equation}
+In 3D, this matrix is further specified by:
+
+\begin{equation}
+\boldsymbol{E}_A
+=
+\begin{bmatrix}
+n_x & 0 & 0 & n_y & n_z & 0 \\
+0 & n_y & 0 & n_x & 0 & n_z \\
+0 & 0 & n_z & 0 & n_x & n_y
+\end{bmatrix}.
+\end{equation}
+
+where $n_x$, $n_y$ and $n_z$ are the components of the unit normal to the interface. For strict equilibrium across the interface, the traction vectors of element A and element B, namely, $\boldsymbol{t}_A$ and $\boldsymbol{t}_B$, must be equal and opposite at every stress point on the interface, and therefore it is sufficient to enforce:
+\begin{equation}
+\boldsymbol{E}_A\boldsymbol{\sigma}_{Ai}^* + \boldsymbol{E}_B\boldsymbol{\sigma}_{Bi}^* = \boldsymbol{0} \quad \forall i \in \{1, ..., p+1\}
+\end{equation}
+
+
+\subsubsection{Boundary conditions}
+
+For a given boundary edge $\Gamma_{\mathrm{t}}$, the prescribed traction is described as:
+\begin{equation}
+\boldsymbol{\sigma}\boldsymbol{n} = \bar{\boldsymbol{t}}
+\quad \text{on } \Gamma_t .
+\label{eq:tractionBC}
+\end{equation}
+
+
+
+
+\subsection{Yield criterion}
+
+\subsubsection{Mohr-Coulomb failure criterion in 2D}
+
+
+The use of Bernstein elements, as described in the previous section, guarantees a strict lower bound as long as the failure criterion is satisfied at all stress points within the domain. 
+
+In plane strain problems, the Mohr-Coulomb failure criterion for a stress point can be expressed as:
+\begin{equation}
+\sqrt{(\frac{\sigma_{xx, i}-\sigma_{yy, i}}{2})^2 + \sigma_{xy, i}^2} +  \frac{(\sigma_{xx, i}+\sigma_{yy, i})}{2}\sin \phi \leq c \cos \phi
+\label{eq:MC}
+\end{equation} Specifically, when $\phi = 0$, this reduces to the Tresca failure criterion:
+\begin{equation}
+\sqrt{(\frac{\sigma_{xx, i}-\sigma_{yy, i}}{2})^2 + \sigma_{xy, i}^2}  \leq c
+\label{eq:Tresca}
+\end{equation}
+
+In implementing the Mohr–Coulomb failure criterion described in~\eqref{eq:MC}, we introduce an affine transformation matrix as described in~\cite{2DLB}, that allows the criterion to be expressed at stress point $i$ in the uniform $Ax+s=b$ manner as follows:
+\begin{equation}
+\begin{bmatrix}
+\frac{\sin\phi}{2} & \frac{\sin\phi}{2} & 0 \\
+\frac{1}{2} & -\frac{1}{2} & 0 \\
+0 & 0 & 1
+\end{bmatrix}
+\cdot
+\begin{bmatrix}
+\sigma_{xx, i} \\
+\sigma_{yy, i} \\
+\sigma_{xy, i}
+\end{bmatrix}
++
+\begin{bmatrix}
+s_{1,i} \\
+s_{2,i} \\
+s_{3,i}
+\end{bmatrix}
+=
+\begin{bmatrix}
+c \cos\phi \\
+0 \\
+0
+\end{bmatrix}
+\label{eq:2DSOC}
+\end{equation} Then the Mohr-Coulomb failure criterion on stress point $i$ can be satisfied by requiring the second-order cone (SOC) constraint:
+
+\begin{equation}
+||(s_{2,i}, s_{3,i})||_2 \leq s_{1,i}
+\label{eq:2DConic}
+\end{equation}
+
+
+\subsubsection{Drucker-Prager criterion in 3D}
+
+In 3D problems, our current implementation is now able to handle the Drucker-Prager criterion in SOCP form, as described in~\cite{2DLB}. In Cartesian coordinates, this criterion for a stress point may be expressed as:
+
+\begin{equation}
+\sqrt{J_2} + \alpha \sigma_m - k \leq 0
+\label{eq:VM}
+\end{equation} here, $J_2$ is the second invariant of the deviatoric stress tensor, $\sigma_m$ is the mean stress, and $\alpha$ and $k$ are the material parameters.
+
+This can be converted into a SOCP formulation by introducing the affine transformation matrix:
+
+\begin{equation}
+\begin{bmatrix}
+\alpha & \alpha & \alpha & 0 & 0 & 0 \\
+\frac{1}{2}  & 0 & -\frac{1}{2} & 0  & 0 & 0\\
+-\frac{\sqrt{3}}{6} & \frac{\sqrt{3}}{3} & -\frac{\sqrt{3}}{6} & 0 & 0 & 0\\
+
+0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 \\
+0 & 0 & 0 & 0 & 0 & 1 \\
+\end{bmatrix}
+\cdot
+\begin{bmatrix}
+\sigma_{xx, i} \\
+\sigma_{yy, i} \\
+\sigma_{zz, i} \\
+\tau_{xy, i} \\
+\tau_{xz, i} \\
+\tau_{yz, i}
+\end{bmatrix}
++
+\begin{bmatrix}
+
+s_{1,i} \\
+s_{2,i} \\
+s_{3,i} \\
+s_{4,i} \\
+s_{5,i} \\
+s_{6,i}
+\end{bmatrix}
+=
+\begin{bmatrix}
+k \\
+0 \\
+0 \\
+0 \\
+0 \\
+0
+\end{bmatrix}
+\label{eq:3DSOC}
+\end{equation} Then the Drucker-Prager failure criterion on stress point $i$ can be satisfied by requiring the SOC constraint:
+\begin{equation}
+||(s_{2,i}, s_{3,i}, s_{4,i}, s_{5,i}, s_{6,i})||_2 \leq s_{1,i}
+\label{eq:3DConic}
+\end{equation}
+
+
+\subsection{FELA-specific SOCP structure}
+
+With knowledge of the aforementioned constraints, we may implement the intra/inter-element equilibrium, and traction boundary conditions as linear equilibrium constraints, and cast the yield criteria both in 2D and 3D for each stress point as SOC constraints. Then the LB-FELA discretization can be readily cast into large-scale SOCPs using a standard conic form as stated in~\ref{eq:cvxproblem}.
+
+For both the 2D Mohr--Coulomb and 3D Drucker--Prager formulations, the slack vector associated with stress point $i$ can be written in the unified form
+
+\begin{equation}
+\boldsymbol{s}_i =
+\begin{bmatrix}
+t_i \\
+\boldsymbol{r}_i
+\end{bmatrix},
+\qquad
+t_i=s_{1,i},
+\label{eq:soc_partition}
+\end{equation}
+
+where
+
+\begin{equation}
+\boldsymbol{r}_i =
+\begin{cases}
+[s_{2,i},s_{3,i}]^\top, & \text{in 2D},\\[1mm]
+[s_{2,i},s_{3,i},s_{4,i},s_{5,i},s_{6,i}]^\top, & \text{in 3D}.
+\end{cases}
+\end{equation}
+
+Accordingly, the yield constraint at each stress point takes the standard SOC form
+
+\begin{equation}
+\|\boldsymbol{r}_i\|_2 \leq t_i.
+\label{eq:general_conic}
+\end{equation}
+
+The cone associated with the complete LB-FELA problem is therefore the Cartesian product of a zero cone corresponding to the linear equality constraints and a collection of local SOC blocks, which can be readily mapped to the feasible region defined in Equation~\eqref{eq:coneK}. In the present formulation, the linear equilibrium and boundary conditions are enforcecd by fixing the corresponding slack components to zero, and the dimension for the 2D Mohr-Coulomb criterion $q_i=3$ and $q_i=6$ for the 3D Drucker-Prager criterion, while each SOC block $\mathcal{Q}^{3}$ represents a yield constraint of the form $\|(s_{2,i},s_{3,i})\|_2 \le s_{1,i}$ in 2D FELA. In 3D, each SOC block $\mathcal{Q}^{6}$ represents a yield constraint of the form $\|(s_{2,i},s_{3,i},s_{4,i},s_{5,i},s_{6,i})\|_2 \le s_{1,i}$.
+
+
+The zero-cone component enforces the equilibrium and traction boundary conditions by fixing the corresponding slack variables to zero, whereas the SOC blocks enforce the local yield admissibility conditions. This block structure allows the conic projection required by the ADMM scheme to be performed independently for each stress point.
+
+
+\subsection{Adaptive mesh refinement scheme}
+
+Adaptive mesh refinement (AMR) has been widely adopted in FELA due to its ability to produce tighter lower and upper bounds while alleviating computational demands~\cite{adaptive_mesh_Christiansen, adaptive_mesh_Lyamin, adaptive_mesh_ciria, LBAdaptive, Martin_2011, 3DHB}. 
+
+Specifically, Ciria~\cite{adaptive_mesh_ciria} also incorporated simple heuristics such as regular refinement and longest-edge bisection, refining the elements that contributed most to the error bound gap. Lyamin~\cite{adaptive_mesh_Lyamin} proposed an adaptive remeshing strategy for lower bound analysis that uses an advancing-front mesh generator, which is able to capture localized plastic zones near features like footing edges. Lagrange multipliers were chosen as the control variable for error estimation, and various adaptive strategies were compared against each other on numerical examples such as the stability of a vertical cut and the bearing capacity of a strip footing. Martin demonstrated how the robust general-purpose 2D Delaunay triangular mesh generator Triangle~\cite{Triangle} could be used together with the author's in-house FELA code OxLim to resolve slip-line fields~\cite{Martin_2011}. The adaptively refined mesh and the slip line solution show good agreement. Sun~\cite{LBAdaptive} adopted Tetgen~\cite{TetGen} for adaptive meshing in 3D, and came up with a methodology of using only the LB solution. 
+
+Among these approaches, Lyamin~\cite{adaptive_mesh_Lyamin} and Sun~\cite{LBAdaptive} identify elements for refinement using indicators derived solely from a lower-bound (LB) solution. In contrast, Martin~\cite{Martin_2011} and da Silva~\cite{3DHB} rely on the strain-rate field from an upper-bound (UB) solution, marking elements so as to approximately equalize the quantity $\int \dot{\gamma_\text{max}} dA$ across the mesh.
+
+Apart from that, the warm-starting capability of ADMM-based solvers was exploited more thoroughly, since the novel mesh is largely based on the previous mesh and the variables may be copied directly to initialize the solver. This, in practice, resulted in a significant reduction in the number of iterations needed in each computation.
+
+We used Triangle~\cite{Triangle} to adaptively refine the unstructured mesh in 2D, and used Tetgen~\cite{TetGen} in 3D. The refinement indicator adopted here follows Sun~\cite{LBAdaptive}, enabling mesh adaptivity using only the LB solution from the previous iteration. We employ a stress-indicator-based AMR strategy for both the Tresca and Mohr--Coulomb criteria. The procedure is summarized as follows:
+
+\begin{enumerate}
+  \item Solve the coarse-mesh LB-FELA problem to obtain a converged ADMM iterate $(x,s,y)$.
+
+  \item With the SOC slack variable $s$ retained at each stress point, we define a scalar stress indicator that measures proximity to yield. 
+Recall that the yield constraint is written as $\| \boldsymbol{r}_i \|_2 \le t_i $. We define the stress indicator:
+\begin{equation}
+\eta_i := \frac{\left\| \boldsymbol{r}_i \right\|_2}{ t_i } .
+\label{eq:stress_indicator}
+\end{equation}
+
+
+In our setting with $c>0$ and $\phi<90^\circ$, the SOC formulation yields $s_{1,i}>0$ in practice; hence \eqref{eq:stress_indicator} is well-defined. Larger $\eta_i$ indicates a stress state closer to the yield surface and is therefore prioritized for refinement.
+
+  \item For each element $e$, compute an element-wise indicator by taking the maximum over its stress points,
+  \begin{equation}
+    \eta_e := \max_{i\in \mathcal{S}(e)} \eta_i,
+  \end{equation}
+  where $\mathcal{S}(e)$ denotes the set of stress points associated with element $e$.
+
+  \item Partially sort $\{\eta_e\}$ and mark the top $n=\mu N_{\mathrm{elem}}$ elements for refinement, where $N_{\mathrm{elem}}$ is the total number of elements and $\mu\in(0,1)$ controls the refinement fraction. We use $\mu=0.2$ by default.
+
+  \item Generate a \texttt{.area} file for the mesh generator Triangle~\cite{Triangle}. Elements that are not refined are assigned -1. For each marked element $e$, we assign a target maximum area
+  \begin{equation}
+    A^{\mathrm{new}}_{\max,e} = \frac{A_e}{r},
+  \end{equation}
+  where $A_e$ is the current area of element $e$ and $r>1$ is the refinement ratio. We use $r = 4$ by default.
+\end{enumerate}
+
+
+
+
