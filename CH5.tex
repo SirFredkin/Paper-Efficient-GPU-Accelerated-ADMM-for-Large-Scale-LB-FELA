@@ -1,71 +1,33 @@
 
 \section{Discussion}
 
-A vanilla ADMM implementation with GPU acceleration can already be competitive with IPMs on certain large-scale SOCPs. This is because ADMM internally benefits from cheaper iterations since the coefficient matrix remains unchanged throughout the iteration process and therefore is only factorized once, after which the factorization is reused in every subsequent \texttt{solve()}.
+\subsection{Sources of computational efficiency}
 
-\subsection{Effect of solver enhancements}
+The numerical results indicate that the computational advantage of the proposed framework arises from exploiting the structure of lower-bound FELA at several computational levels.
 
+At the linear-algebra level, the repeated linear systems arising in ADMM permit expensive sparse factorizations to be reused across iterations, resulting in a substantially lower cost per iteration than that of the IPM solvers. At the conic-constraint level, active-cone identification exploits the fact that only a subset of the local yield constraints governs the solution near collapse, allowing the penalty weights to be adapted selectively. At the mesh-sequence level, coarse-to-fine warm-starting transfers information between closely related FELA problems and reduces the transient phase of convergence. Finally, the dominant linear algebra, projection, and vector operations are mapped onto the GPU, further reducing the cost of each ADMM iteration.
 
-Beyond this baseline, our work introduces two mechanisms that substantially improve ADMM performance on the large sparse SOCPs arising from lower-bound FELA in particular:
-
-\begin{enumerate}
-  \item \textbf{Active-cone identification with adaptive updates.}
-  Since only a subset of cones is typically active at optimality, we periodically detect potentially active conic constraints and update the relevant entries of $D(\rho)$, which tends to improve convergence by emphasizing the active part of the feasible set. 
-
-  \item \textbf{Coarse-to-fine continuation via warm-starting.}
-  We warm-start fine-mesh solves with coarse-mesh solutions, exploiting ADMM's sensitivity to initialization to reduce the iterations required to meet the same stopping criteria. This idea is not limited to computational mechanics and has the potential to extend to other large-scale optimization settings involving a family of closely related problems.
-\end{enumerate}
-
-Both approaches substantially reduced the iteration count required for ADMM to reach the same termination tolerances. Also, with the adaptive updates on the penalty matrix $D(\rho)$, the convergence speed of ADMM now relies less on the initial selection of $\rho$ since the penalty parameter is adjusted dynamically during the iterations. The results also indicate that the required iteration count remains approximately independent of the problem size.
-
-Here, we discuss the specific improvement made by each individual upgrade to the overall solver performance in the 3D rigid platen problem. The subdivision used is a structured mesh, with 20 subdivisions on the longest side and therefore has 48000 linear tetrahedral stress elements, with  1.152 million variables, as shown in the last entry of Table~\ref{tab:3D2PR_table}. A specific performance comparison of using different solver options is given below, and here we choose the solver using the augmented matrix (AUG for short) with warm-starting (WS) and cone identification (CI) as the baseline.
-
-\begin{table}[htbp]
-\centering
-\caption{Solver performance with different solver options}
-\label{tab:Ablation_table}
-\begin{tabular}{@{}p{3cm}p{1.8cm}p{1.6cm}p{2cm}p{2.5cm}p{1.4cm}@{}}
-\toprule
-\textbf{Solver options} & \textbf{Solve time (s)} & \textbf{Iterations} &  \textbf{Analysis time (s)} & \textbf{Factorization time (s)} & \textbf{$\beta$} \\
-\midrule
-\texttt{AUG + Projection} 	& 41.30  	& 140 	& 19.20 & 18.31 & 2.09477 \\
-\texttt{AUG + WS + CI}    	& 61.99  	& 180	& 19.58 & 16.21 & 2.09708 \\
-\texttt{AUG + CI}         	& 110.74	& 280 	& 19.82 & 16.01 & 2.09229 \\
-\texttt{AUG + WS}         	& 98.34  	& 600 	& 19.96 & 16.09 & 2.09750 \\
-\texttt{Condensed}        	& 352.05   & 440  	& 37.35 & 45.00 & 2.09749 \\
-
-\bottomrule
-\end{tabular}
-\vspace{0.5em}
-\end{table}
-
-As shown in Table~\ref{tab:Ablation_table}, the use of the three-dimensional ellipsoidal projection leads to the best overall performance among the tested configurations. Compared with the baseline \texttt{AUG + WS + CI} solver, \texttt{AUG + Projection} reduces the number of ADMM iterations from 180 to 140 and decreases the total solve time from 61.99s to 41.30s, while producing a comparable collapse multiplier. This indicates that the projection-based treatment improves the convergence behaviour of the solver for this problem. Moreover, the projection operation is naturally amenable to GPU parallelization and introduces only a small overhead, accounting for approximately 3\% of the total runtime.
-
-The condensed formulation, by contrast, incurred the highest computational cost. As shown in Table~\ref{tab:Ablation_table}, its analysis and factorization times were substantially greater than those of the augmented formulation. This is primarily due to the increased fill-in produced during the direct factorization of the condensed system. Consequently, the memory required to store the factors exceeded the available GPU memory, introducing additional GPU I/O overhead and further degrading the overall performance.
-
-The effects of warm-starting and active cone identification can also be observed from the comparison between \texttt{AUG + WS}, \texttt{AUG + CI}, and \texttt{AUG + WS + CI}. Using active cone identification alone reduces the number of iterations compared with warm-starting alone, from 600 to 280. However, it results in a longer solve time because identifying the active cones changes the matrix entries and therefore requires repeated matrix updates and re-factorizations. Warm-starting alone avoids this additional factorization cost, but requires significantly more ADMM iterations. Combining warm-starting with active cone identification provides the best balance between iteration reduction and factorization overhead between these two enhancements, reducing the solve time to 61.99s.
-
-
-
+These mechanisms are complementary. Warm-starting primarily improves the initial iterate, active-cone identification improves convergence during the later stages of the solve, and GPU acceleration reduces the computational cost of carrying out each iteration. The combined effect is therefore a large reduction in overall time-to-solution especially as the problem size increases.
 
 \subsection{Scalability bottleneck of direct factorization in 3D}
+\label{sec:3D_scalability}
 
+The principal scalability limitation of the current 3D implementation arises from fill-in during sparse direct factorization. Although the ADMM iterations remain relatively inexpensive in terms of iteration count, the linear systems generated by three-dimensional FELA become substantially more demanding as the mesh is refined. This behaviour is primarily associated with the different sparsity structure of the 3D formulation.
 
-The availability of high-performance GPUs makes it possible to solve 2D and 3D FELA problems with adaptive mesh refinement and higher-order elements, often obtaining accurate lower-bound solutions within a few minutes. The direct solve routine is computationally efficient as long as the factorization fits within GPU device memory and does not require out-of-core memory I/O operations. Nevertheless, the proposed GPU-based direct factorization approach still faces a fundamental scalability bottleneck: its dependence on GPU device memory. As the problem size increases, especially in 3D simulations, the KKT system grows rapidly and the memory required to store the sparse factors can become prohibitive. This may ultimately limit the largest problem size that can be solved on a given GPU.
-
-This limitation was not observed even in the largest 2D benchmarks. However, it became significant for large-scale 3D discretizations, even when the total number of variables was similar. The main reason is that the cost of sparse direct factorization is governed not only by the dimension of the linear system, but also by the sparsity pattern and the amount of fill-in generated during factorization. In 3D finite element problems, the factorization process typically leads to much denser matrices and substantially more fill-in than in 2D problems. As a result, both the numerical factorization and the repeated triangular solves required in the ADMM iterations can become dominated by memory traffic and I/O operations.
-
-This difference is particularly pronounced in FELA. In LB formulations, each stress point involves more stress components in 3D problems than in 2D, leading to larger local blocks and bandwidth in the assembled system. The sparsity pattern of the $A$ matrix in FELA is demonstrated in Figure~\ref{fig:A_sparsity}. 
+In lower-bound FELA, the 3D discretization introduces stronger and more spatially extensive coupling than its 2D counterpart. Each stress point contains more stress components, the intra-element equilibrium conditions increase from two equations per stress point in 2D to three in 3D, and the dimension of the SOC blocks increases from three to six for the Drucker--Prager or von Mises formulations considered here. Together with the increased connectivity of three-dimensional finite-element meshes, these larger local blocks lead to a more strongly coupled constraint matrix, as illustrated by the sparsity patterns in Figure~\ref{fig:A_sparsity}.
 
 \begin{figure}
-\centering\includegraphics[width=0.8\textwidth]{figures/Res_To_Date/A_sparsity.png} 
-\caption{Sparsity pattern of the constraint matrix $A$}
-\label{fig:A_sparsity}
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/Res_To_Date/A_sparsity.png}
+    \caption{Sparsity patterns of the constraint matrix $A$ in the 2D and 3D FELA formulations.}
+    \label{fig:A_sparsity}
 \end{figure}
 
-Here, the 3D finite element connectivity introduces stronger and more spatially extensive coupling between variables in the inter-element equilibrium part of the constraint matrix $A$. Apart from that, the extra dimension increases the number of equality constraints required per stress point from 2 to 3 in intra-element equilibrium, and the dimension of the SOC constraints increased from $3\times3$ to $6\times6$ in 3D, when using Drucker-Prager or von Mises yield criterion.
+The stronger coupling in the 3D system leads to substantially more fill-in during reordering and factorization. As a result, the numerical factors become significantly larger, increasing both the memory required to store them and the computational cost of the associated sparse linear algebra. In particular, the numerical factorization required whenever the system matrix is updated becomes more expensive, while the repeated triangular solves performed at each ADMM iteration also incur a higher cost.
 
-Consequently, even for problems with a similar number of variables, the resulting KKT systems may exhibit much denser factors after reordering and factorization. This explains why the direct GPU-based approach remains highly efficient for the 2D plane strain cases studied here, but becomes more challenging for large-scale 3D discretizations. 
+Consequently, the computational expense of large 3D problems is not determined solely by the number of ADMM iterations. As the factors grow and approach the available GPU memory capacity, memory traffic, data movement, and the cost of operating on the enlarged sparse factors increasingly dominate the overall solution time. This effect can be substantial even when the 2D and 3D problems contain a comparable number of optimization variables, since sparse-factorization cost depends strongly on the sparsity pattern and the resulting fill-in rather than on the system dimension alone.
+
+This explains why the direct GPU-based approach remains highly efficient for the 2D plane-strain benchmarks considered here, while its scalability becomes increasingly constrained by sparse direct factorization in large-scale 3D discretizations. The observed bottleneck therefore motivates the consideration of indirect or matrix-free linear-solver strategies, as discussed in the following section.
 
 \subsection{Potential of indirect and matrix-free ADMM solvers}
 
@@ -80,8 +42,7 @@ The proposed method achieves a speedup over the IPM on many large-scale problems
 While the proposed acceleration techniques are developed in the context of LB-FELA, they target generic bottlenecks of first-order methods for SOCPs. Therefore, they may also benefit other sparse SOCPs with PDE-like structures. A systematic evaluation on broader classes of problems is left for future work.
 
 
-
-Apart from the advances made in the GPU-accelerated ADMM solver, this study also implemented a simple but effective adaptive mesh refinement strategy that relies only on the lower-bound solution. The proposed framework was able to obtain a tight and strict lower-bound solution within one minute in 2D examples. This improvement stems not only from the acceleration provided by the GPU solver, but also from the computational efficiency of the higher-order Bernstein formulation~\cite{Bernstein_FELA}.
+Apart from the GPU-accelerated ADMM solver itself, the integration with adaptive mesh refinement enables the computational effort to be concentrated in the regions most relevant to the collapse mechanism, leading to tighter lower-bound solutions without uniformly refining the entire domain.
 
 Future work will also consider more advanced yield criteria, such as Mohr-Coulomb and Lade-Duncan. Incorporating these criteria would increase the practical value of the proposed methodology, as they are widely used in geotechnical and engineering applications. Within the ADMM framework, such criteria can be incorporated provided that the projection of a general stress state onto the admissible yield surface can be computed efficiently~\cite{daSilva_2020, 3DLD}. For example, although not necessarily in the context of FELA, Clausen and co-workers implemented the three-dimensional Mohr-Coulomb criterion using a return-mapping strategy, in which the stress state is transformed into principal stress space, projected onto the yield surface, and then transformed back to the original stress space~\cite{Clausen_2007}. Extending this type of projection strategy to the present FELA-ADMM framework is a promising direction for future research.
 

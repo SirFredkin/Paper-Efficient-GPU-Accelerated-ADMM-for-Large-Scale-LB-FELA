@@ -201,7 +201,7 @@ The ultimate bearing capacity of a strip footing on weightless cohesive soil is 
 & \multirow{3}{*}{1.44}
 & MOSEK  & 126.85 & 5.11932 & 33 & 3.84 \tabularnewline
 & & Gurobi & 270.60    & 5.11932   & 35   & 8.59 \tabularnewline
-& & ADMM   & 33.21  & 5.11945 & 620 & 0.054 \tabularnewline
+& & ADMM   & 25.82  & 5.11939 & 460 & 0.056 \tabularnewline
 
 \bottomrule
 \end{tabular}
@@ -279,7 +279,7 @@ As shown in Table~\ref{tab:VC_timecomp}, the proposed ADMM solver constantly out
 & \multirow{3}{*}{0.36}
 & MOSEK  & 42.90 & 3.77269 &  40  &1.12 \tabularnewline
 & & Gurobi & 39.27   & 3.77269&   34    & 1.28 \tabularnewline
-& & ADMM   & 6.50 & 3.77255&  460  & 0.025 \tabularnewline
+& & ADMM   & 4.14 & 3.77255&  460  & 0.025 \tabularnewline
 
 \addlinespace
 
@@ -287,7 +287,7 @@ As shown in Table~\ref{tab:VC_timecomp}, the proposed ADMM solver constantly out
 & \multirow{3}{*}{0.52}
 & MOSEK  & 43.08 & 3.77334 &  46  & 1.09 \tabularnewline
 & & Gurobi & 57.85    & 3.77333 & 37  & 1.77 \tabularnewline
-& & ADMM   & 7.08  & 3.77330 & 340 & 0.035\tabularnewline
+& & ADMM   & 5.47  & 3.77330 & 340 & 0.035\tabularnewline
 
 \addlinespace
 
@@ -328,20 +328,97 @@ We may observe from Figure~\ref{fig:VC_AMR} that the refined zone matches with t
 
 \subsubsection{Discussion}
 
-After examining the three 2D benchmark problems individually, we summarize the overall timing performance of the solvers in Figure~\ref{fig:2DTimecomp}. The figure compares the time to solution of ADMM, MOSEK, and Gurobi as the problem size increases for the rigid platen, strip footing, and vertical cut problems. Gurobi is often faster than MOSEK for smaller problem instances, but its performance deteriorates significantly for larger problems. In contrast, the proposed ADMM solver consistently achieves the shortest solution times while maintaining high solution accuracy, with the absolute error in the collapse multiplier remaining below \(10^{-4}\). This speedup is primarily attributed to the substantially lower cost per ADMM iteration compared with that of the IPM solvers, together with the fact that the number of ADMM iterations increases only moderately as the problem size grows.
+After examining the three 2D benchmark problems individually, we summarize the overall timing performance of the solvers in Figure~\ref{fig:2DTimecomp}. The figure compares the time to solution of ADMM, MOSEK, and Gurobi as the problem size increases for the rigid platen, strip footing, and vertical cut problems. Gurobi is often faster than MOSEK for smaller problem instances, but its performance deteriorates significantly for larger problems. In contrast, the proposed ADMM solver consistently achieves the shortest solution times while maintaining close agreement with the IPM solutions, with the absolute difference in the computed collapse multiplier remaining below approximately $10^{-4}$.  This speedup is primarily attributed to the substantially lower cost per ADMM iteration compared with that of the IPM solvers, together with the fact that the number of ADMM iterations increases only moderately as the problem size grows.
+
+
+
+
 
 The irregular spikes observed in the MOSEK timings for the rigid platen and strip footing problems are primarily attributed to a larger number of interior-point iterations required for those particular cases.
 
+
+
+Specifically, we investigate the individual effects of the two proposed acceleration strategies, namely warm-starting (WS) and active-cone identification (CI). Figure~\ref{fig:2DTimecomp} compares the runtime of the proposed ADMM solver against variants employing WS or CI individually, thereby illustrating the contribution of each technique to the overall solver performance.
+
+
+\paragraph{Effect of warm-starting}
+
+Figure~\ref{fig:2DTimecomp} shows that the ADMM+WS variant achieves runtimes close to those of the proposed ADMM solver for the smaller problem instances. As the problem size increases, however, the performance gap becomes more apparent. Warm-starting primarily improves the initial stage of the optimization by providing an iterate that is already close to the solution of the refined problem. This reduces the transient phase of ADMM convergence and, consequently, the number of iterations required to reach the prescribed stopping tolerances. Nevertheless, warm-starting does not directly address the slower convergence that may arise during the later stages of the iteration process.
+
+\paragraph{Effect of active-cone identification}
+
+The ADMM+CI variant is generally slower than both ADMM+WS and the proposed ADMM solver in the cases considered, although it remains faster than the commercial IPM solvers. Its effect is complementary to that of warm-starting. Whereas warm-starting improves the initial iterate, active-cone identification modifies the penalty weights associated with SOC blocks that are likely to be active at the solution. By placing greater emphasis on these constraints, the method improves the enforcement of the locally governing part of the feasible set and accelerates late-stage convergence.
+
+This behaviour becomes increasingly important for the larger problem instances. As shown in Figure~\ref{fig:2DTimecomp}, the proposed ADMM solver, which combines WS and CI, outperforms the WS-only variant for the largest cases considered. The results therefore suggest that warm-starting and active-cone identification act on different phases of the ADMM iteration: warm-starting reduces the initial transient, while active-cone identification improves convergence as the iterates approach the solution. Their combination provides a more consistent reduction in the overall time-to-solution, while the required number of ADMM iterations remains approximately insensitive to the problem size over the range considered.
+
+\paragraph{Effect of warm-starting in adaptive mesh refinement}
+
+The structured-mesh experiments above provide a controlled setting for evaluating the algorithmic effect of warm-starting across problem sizes. In practical FELA analyses, however, mesh refinement is more naturally performed sequentially through adaptive refinement, producing a hierarchy of closely related but non-identical optimization problems. This setting provides a distinct test of the proposed transfer strategy, since both the mesh topology and local element sizes evolve between successive solves.
+
+To assess the effectiveness of warm-starting in this more representative workflow, we compare the final AMR solve with and without transferring the solution from the preceding mesh. The results are reported in Table~\ref{tab:2DWS_AMR}. Across the three 2D benchmarks, warm-starting reduces both the iteration count and the overall solution time while producing essentially unchanged collapse multipliers. These results confirm that the proposed warm-starting strategy remains effective not only in controlled structured-mesh comparisons, but also in a genuinely hierarchical adaptive-refinement setting.
+
+
+
+
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.32\textwidth]{figures/Res_To_Date/TC2PR.png}
-  \hfill
-  \includegraphics[width=0.32\textwidth]{figures/Res_To_Date/TCSF.png}
-  \hfill
-  \includegraphics[width=0.32\textwidth]{figures/Res_To_Date/TCVC.png}
-  \caption{Timing comparison of ADMM against IPM solvers in 2D benchmark problems (From left to right: Rigid platen, strip footing, vertical cut)}
+  \includegraphics[width=0.95\textwidth]{figures/Res_To_Date/TC_ALL.png}
+  \caption{Timing comparison of different ADMM implementations against IPM solvers in 2D benchmark problems using structured mesh (From left to right: Rigid platen, strip footing, vertical cut)}
   \label{fig:2DTimecomp}
 \end{figure}
+\begin{table}[htbp] 
+\centering 
+\caption{Performance enhancement achieved with warm-starting using adaptive refined mesh} 
+\label{tab:2DWS_AMR} 
+ 
+\begin{tabular}{@{}C{2.1cm}C{1.8cm}C{1.8cm}C{2cm}C{1.5cm}C{1.6cm}C{2.1cm}C{1.6cm}@{}} 
+\toprule 
+\textbf{Problem type} &
+\multicolumn{2}{c}{\textbf{Problem size}} & 
+\textbf{Warm starting} & 
+\textbf{Solve time (s)} & 
+\textbf{Iterations} & 
+\textbf{Load multiplier} & 
+\textbf{Speedup} 
+\tabularnewline 
+\cmidrule(lr){2-3} 
+& 
+\textbf{$N_{\mathrm{elem}}(\times 10^3)$} & 
+\textbf{$N_{\mathrm{var}}(\times 10^6)$} & 
+& 
+& 
+& 
+& 
+\tabularnewline 
+\midrule 
+ 
+\multirow{2}{*}{Rigid Platen} 
+& \multirow{2}{*}{362.49} 
+& \multirow{2}{*}{3.26} 
+& Yes & 52.24 & 400 & 2.42681 & \multirow{2}{*}{16\%} \tabularnewline 
+& & & No  & 61.91 & 460 & 2.42689 & \tabularnewline 
+ 
+\addlinespace 
+ 
+\multirow{2}{*}{Strip Footing} 
+& \multirow{2}{*}{553.50} 
+& \multirow{2}{*}{4.98} 
+& Yes & 75.15 & 400 & 5.13648 & \multirow{2}{*}{40\%} \tabularnewline 
+& & & No  & 125.35 & 620 & 5.13668 & \tabularnewline 
+ 
+\addlinespace 
+ 
+\multirow{2}{*}{Vertical Cut} 
+& \multirow{2}{*}{452.23} 
+& \multirow{2}{*}{4.07} 
+& Yes & 77.56 & 460 & 3.77522 & \multirow{2}{*}{30\%} \tabularnewline 
+& & & No  & 110.90 & 660 & 3.77549 & \tabularnewline 
+ 
+\bottomrule 
+\end{tabular} 
+ 
+\vspace{0.5em} 
+\end{table}
 
 
 \subsection{3D Benchmark Problems}
@@ -406,8 +483,8 @@ This example considers the 3D compression of a von Mises soil block between two 
 
 \addlinespace
 
-\multirow{3}{*}{96}
-& \multirow{3}{*}{2.304}
+\multirow{3}{*}{48}
+& \multirow{3}{*}{1.152}
 & MOSEK  & 371.2 & 2.09755 & 39 & 9.52 \tabularnewline
 & & Gurobi & 618.31 & 2.09755 & 17 & 36.37 \tabularnewline
 & & ADMM   & 61.99 & 2.09708 & 180 & 0.34\tabularnewline
@@ -418,7 +495,7 @@ This example considers the 3D compression of a von Mises soil block between two 
 \vspace{0.5em}
 \end{table}
 
-Table~\ref{tab:3D2PR_table} shows that our solver still yields a speedup, from $2.04\times$ to $5.00\times$ compared with MOSEK in 3D FELA problems. Speedup is achieved in both linear and linear elements, with the largest speedup of $5.99\times$ achieved at the largest linear case. It should be noted however, the sparsity pattern of the 3D problem differs from that of the 2D problems, thereby incurring a substantial increase in the number of fill-ins in direct factorization, which limited the maximum problem size we can explore.
+Table~\ref{tab:3D2PR_table} shows that our solver still yields a speedup, from $2.04\times$ to $5.99\times$ compared with MOSEK in 3D FELA problems. Speedup is achieved in both linear and linear elements, with the largest speedup of $5.99\times$ achieved at the largest linear case. It should be noted however, the sparsity pattern of the 3D problem differs from that of the 2D problems, thereby incurring a substantial increase in the number of fill-ins in direct factorization, which limited the maximum problem size we can explore.
 
 \subsubsection{Square Footing Problem}
 
@@ -541,6 +618,36 @@ Adaptive mesh refinement enables the failure mechanism of the vertical cut to be
 \end{figure}
 \subsubsection{Discussion}
 
-As in the 2D examples, the proposed ADMM solver remains competitive in the 3D benchmarks, achieving a speedup of approximately \(2\times\) to \(4\times\) over MOSEK. Gurobi is consistently slower across the cases considered. Although the speedup is less pronounced than that observed for the 2D problems, the underlying reasons are discussed in the following section. Nevertheless, the computational cost per ADMM iteration remains substantially lower than that of an IPM iteration. Moreover, with warm-starting and active-cone identification, the number of ADMM iterations varies only moderately as the problem size increases.
+As in the 2D examples, the proposed ADMM solver remains computationally competitive in the 3D benchmarks. Although the speedup over the IPM solvers is generally less pronounced than in 2D, the computational cost per ADMM iteration remains substantially lower than that of an IPM iteration. Moreover, with warm-starting and active-cone identification, the number of ADMM iterations varies only moderately as the problem size increases.
 
-The use of adaptive mesh refinement also yields tighter lower-bound solutions and provides a more detailed representation of the failure region. However, a clearly defined 3D 'slip surface' is not fully resolved, primarily because achieving the required level of mesh refinement would incur prohibitive computational cost.
+The reduced speedup observed in 3D is not primarily caused by a deterioration of the ADMM iteration itself. Instead, the dominant computational cost shifts increasingly toward the sparse linear algebra, particularly numerical factorization and repeated triangular solves. This effect is much more pronounced in three-dimensional FELA because of the denser connectivity and greater fill-in generated during factorization. The underlying scalability implications are discussed in detail in Section~\ref{sec:3D_scalability}.
+
+To further examine how the individual solver enhancements contribute to the overall performance in 3D, we consider the rigid platen benchmark with a structured mesh of 48,000 linear tetrahedral stress elements and approximately 1.15 million variables. A vanilla GPU-accelerated ADMM implementation already benefits from inexpensive repeated iterations through factorization reuse, while the proposed framework introduces additional mechanisms to improve convergence and reduce the cost of the underlying linear algebra. We therefore compare several solver configurations involving warm-starting (WS), active-cone identification (CI), augmented (AUG) and condensed linear-system formulations, and the alternative ellipsoidal projection strategy. The corresponding results are summarized in Table~\ref{tab:Ablation_table}.
+
+
+\begin{table}[htbp]
+\centering
+\caption{Solver performance with different solver options}
+\label{tab:Ablation_table}
+\begin{tabular}{@{}p{3cm}p{1.8cm}p{1.6cm}p{2cm}p{2.5cm}p{1.4cm}@{}}
+\toprule
+\textbf{Solver options} & \textbf{Solve time (s)} & \textbf{Iterations} &  \textbf{Analysis time (s)} & \textbf{Factorization time (s)} & \textbf{$\beta$} \\
+\midrule
+\texttt{AUG + Projection} 	& 41.30  	& 140 	& 19.20 & 18.31 & 2.09477 \\
+\texttt{AUG + WS + CI}    	& 61.99  	& 180	& 19.58 & 16.21 & 2.09708 \\
+\texttt{AUG + CI}         	& 110.74	& 280 	& 19.82 & 16.01 & 2.09229 \\
+\texttt{AUG + WS}         	& 98.34  	& 600 	& 19.96 & 16.09 & 2.09750 \\
+\texttt{Condensed}        	& 352.05   & 440  	& 37.35 & 45.00 & 2.09749 \\
+
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+\end{table}
+
+The individual effects of warm-starting and active-cone identification are evident from the comparison between AUG+WS, AUG+CI, and AUG+WS+CI. Warm-starting alone requires 600 iterations, whereas active-cone identification reduces this to 280 iterations, indicating that CI is particularly effective in accelerating the later stages of convergence. However, CI changes the entries of the system matrix and therefore introduces repeated numerical refactorizations. Consequently, despite the lower iteration count, AUG+CI requires 110.74s, compared with 98.34s for AUG+WS. Combining the two strategies provides a better balance between convergence acceleration and refactorization overhead, reducing the iteration count further to 180 and the total solution time to 61.99s.
+
+The alternative ellipsoidal projection strategy provides a further reduction in computational cost for this particular 3D problem. Compared with AUG+WS+CI, the projection-based formulation reduces the number of iterations from 180 to 140 and the total solution time from 61.99s to 41.30s. However, this improvement is accompanied by a slightly larger discrepancy in the computed collapse multiplier, with $\beta=2.09477$ compared with $\beta=2.09708$ for AUG+WS+CI. Although the difference remains small, the AUG+WS+CI configuration provides a more consistent balance between computational efficiency and solution accuracy. For this reason, AUG+WS+CI is adopted as the default configuration in the remaining 3D benchmark comparisons.
+
+The choice of linear-system formulation has an even stronger influence on the computational cost in 3D. The condensed formulation (with warm-starting and cone identification) requires 352.05s, substantially longer than the augmented configurations, and also incurs markedly larger analysis and factorization costs. Unlike the convergence enhancements discussed above, this difference originates primarily from the sparse linear algebra rather than from the number of ADMM iterations. Indeed, the condensed formulation converges in 440 iterations, fewer than the 600 iterations required by the AUG+WS configuration, yet still takes substantially longer to solve. Forming and factorizing the condensed system generates substantially more fill-in in the 3D problem, increasing both memory consumption and the cost of each repeated triangular solves. This observation motivates the more detailed discussion of the 3D direct-factorization bottleneck in Section~\ref{sec:3D_scalability}.
+
+The use of adaptive mesh refinement also yields tighter lower-bound solutions and provides a more detailed representation of the localized failure region. However, in the present 3D implementation, further refinement is ultimately constrained by the memory demand of sparse direct factorization. This observation reinforces the need for more memory-scalable linear-solver strategies in large-scale 3D FELA.
